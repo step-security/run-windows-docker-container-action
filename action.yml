@@ -124,7 +124,7 @@ runs:
       if: inputs.registry_authentication == 'true'
       shell: powershell
       run: >-
-        docker login ${{ inputs.registry_repository }} -u ${{ inputs.registry_username }} -p ${{ inputs.registry_token }}
+        "${{ inputs.registry_token }}" | docker login ${{ inputs.registry_repository }} -u ${{ inputs.registry_username }} --password-stdin
     - name: Pre-warm
       if: inputs.pre-warm == 'true'
       run: |
