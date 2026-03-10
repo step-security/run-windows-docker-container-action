@@ -1,0 +1,161 @@
+name: Execute-in-windows-docker-container
+description: Composite action for command execution with docker on windows
+author: step-security
+branding:
+  icon: "play"
+  color: "blue"
+
+inputs:
+  image:
+    description: 'Docker image.'
+    required: true
+  run:
+    description: 'Command to execute.'
+    required: true
+  workspace_path:
+    description: 'Workspace path. Default is root workspace path.'
+    required: false
+  mapping_path:
+    description: 'Mapping path, i.e. path to where the workspace path is mapped in the docker container. Defaults to workspace_path.'
+    required: false
+  work_path:
+    description: 'Work path, i.e. path where the command in the docker container is executed. Defaults to workspace_path.'
+    required: false
+  memory:
+    description: 'Memory limit. See docker documentation on --memory.'
+    required: false
+    default: '4GB'
+  entrypoint:
+    description: "Overrides the default ENTRYPOINT in docker image."
+    required: false
+    default: ''
+  env_names:
+    description: 'Environment variable names passed to docker image as comma separated list, for example: NAME1, NAME2, NAME3'
+    required: false
+    default: ''
+  extra_args:
+    description: 'Extra arguments for docker run command.'
+    required: false
+    default: ''
+  pre-warm:
+    description: 'Run a warming-up container (which might crash due to first time use failure)'
+    required: false
+    default: 'true'
+  pre-warm-cmd:
+    description: 'Pre warm command to run inside the container'
+    required: false
+    default: 'echo "warming up!"'
+  registry_authentication:
+    description : 'Authenticate against registry server'
+    required : false
+    default: 'false'
+  registry_username:
+    description: 'Docker registry username.'
+    required: false
+  registry_token:
+    description: 'Docker registry token'
+    required: false
+  registry_repository:
+    description: 'Docker registry repository'
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - name: Subscription check
+      env:
+        REPO_PRIVATE: ${{ github.event.repository.private }}
+      run: |
+        # validate subscription status
+        UPSTREAM="philips-software/run-windows-docker-container-action"
+        ACTION_REPO="${GITHUB_ACTION_REPOSITORY:-}"
+        DOCS_URL="https://docs.stepsecurity.io/actions/stepsecurity-maintained-actions"
+
+        echo ""
+        echo -e "\033[1;36mStepSecurity Maintained Action\033[0m"
+        echo "Secure drop-in replacement for $UPSTREAM"
+        if [ "$REPO_PRIVATE" = "false" ]; then
+          echo -e "\033[32m✓ Free for public repositories\033[0m"
+        fi
+        echo -e "\033[36mLearn more:\033[0m $DOCS_URL"
+        echo ""
+
+        if [ "$REPO_PRIVATE" != "false" ]; then
+          SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}"
+
+          if [ "$SERVER_URL" != "https://github.com" ]; then
+            BODY=$(printf '{"action":"%s","ghes_server":"%s"}' "$ACTION_REPO" "$SERVER_URL")
+          else
+            BODY=$(printf '{"action":"%s"}' "$ACTION_REPO")
+          fi
+
+          API_URL="https://agent.api.stepsecurity.io/v1/github/$GITHUB_REPOSITORY/actions/maintained-actions-subscription"
+
+          RESPONSE=$(curl --max-time 3 -s -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "$BODY" \
+            "$API_URL" -o /dev/null) && CURL_EXIT_CODE=0 || CURL_EXIT_CODE=$?
+
+          if [ $CURL_EXIT_CODE -ne 0 ]; then
+            echo "Timeout or API not reachable. Continuing to next step."
+          elif [ "$RESPONSE" = "403" ]; then
+            echo -e "::error::\033[1;31mThis action requires a StepSecurity subscription for private repositories.\033[0m"
+            echo -e "::error::\033[31mLearn how to enable a subscription: $DOCS_URL\033[0m"
+            exit 1
+          fi
+        fi
+      shell: bash
+    - name: check
+      if: runner.os != 'Windows'
+      run: |
+        echo "::error file=run-windows-docker-container-action/action.yml,line=68,col=1,endColumn=1::This action can only run on windows";
+        exit -1
+      shell: bash
+    - name: settings
+      id: settings
+      run: >-
+          ${{ github.action_path }}/src/parse_input_paths.ps1 -githubWorkSpace "${{ github.workspace }}" -workspacePath "@${{ inputs.workspace_path }}" -mappingPath "@${{ inputs.mapping_path }}" -workPath "@${{ inputs.work_path }}";
+          ${{ github.action_path }}/src/parse_input_extra_args.ps1 -envNames "@${{ inputs.env_names }}" -entryPoint "@${{ inputs.entrypoint }}" -extraArgs "@${{ inputs.extra_args }}";
+          ${{ github.action_path }}/src/assign_default_environment_variables.ps1;
+      shell: powershell
+    - name: docker_login
+      id: docker_login
+      if: inputs.registry_authentication == 'true'
+      shell: powershell
+      run: >-
+        docker login ${{ inputs.registry_repository }} -u ${{ inputs.registry_username }} -p ${{ inputs.registry_token }}
+    - name: Pre-warm
+      if: inputs.pre-warm == 'true'
+      run: |
+        docker run ${{ steps.settings.outputs.extra_args }} `
+        --rm --memory=${{ inputs.memory }} `
+        -v ${{ steps.settings.outputs.workspace_path }}:${{ steps.settings.outputs.mapping_path }} `
+        -w ${{ steps.settings.outputs.work_path }} `
+        ${{ inputs.image }} { ${{ inputs.pre-warm-cmd }} }
+        exit 0
+      shell: powershell
+    - name: Run
+      run: >-
+        $runnerPathSource = Split-Path -Path "${env:RUNNER_TEMP}" -Parent;
+        $runnerPathTarget = $runnerPathSource.replace('D:', 'C:')
+
+        docker run
+        ${{ steps.settings.outputs.default_environment_variables }}
+        ${{ steps.settings.outputs.extra_args }}
+        --rm
+        --memory=${{ inputs.memory }}
+        -v ${runnerPathSource}:${runnerPathTarget}
+        -v ${{ steps.settings.outputs.workspace_path }}:${{ steps.settings.outputs.mapping_path }}
+        -w ${{ steps.settings.outputs.work_path }}
+        ${{ inputs.image }}
+        {
+        ${{ inputs.run }}
+        }
+      shell: powershell
+    - name: docker_logout
+      id: docker_logout
+      if: inputs.registry_authentication == 'true'
+      shell: powershell
+      run: >-
+        docker logout ${{ inputs.registry_repository }}
