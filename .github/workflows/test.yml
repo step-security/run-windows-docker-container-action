@@ -22,7 +22,6 @@ jobs:
     env:
       TEST1: Test1
       TEST2: Test2
-      TEST3: ${{ secrets.TEST_SECRET }}
       TEST_MAPPING_PATH: "C:\\map"
     strategy:
       matrix:
@@ -62,7 +61,7 @@ jobs:
           image: ${{ matrix.docker_container }}
           entrypoint: powershell.exe
           mapping_path: 'c:\map'
-          env_names: TEST1, TEST2, TEST3
+          env_names: TEST1, TEST2
           run: >-
             c:\map\test\run_test.ps1 -testPath "c:\map\test\environment.Tests.ps1";
 

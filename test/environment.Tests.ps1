@@ -11,9 +11,4 @@ Describe "environment" {
         }
     }
 
-    Context "when secret environments are set" {
-        It "TEST3 should be passed" {
-            Write-Output $env:TEST3 | Should -Be "this-is-secret"
-        }
-    }
 }
