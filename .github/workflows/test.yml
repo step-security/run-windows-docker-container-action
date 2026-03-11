@@ -1,0 +1,140 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - '**.MD'
+  pull_request:
+    branches: [ main ]
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - '**.md'
+      - '**.MD'
+
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-2022
+    name: Test
+    env:
+      TEST1: Test1
+      TEST2: Test2
+      TEST_MAPPING_PATH: "C:\\map"
+    strategy:
+      matrix:
+        docker_container: ["mcr.microsoft.com/windows/servercore:ltsc2022"]
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Start Docker Service
+        shell: powershell
+        run: |
+          Start-Service docker
+          docker info
+      - name: Test_Run_Default
+        uses: ./
+        with:
+          image: ${{ matrix.docker_container }}
+          mapping_path: 'c:\map'
+          entrypoint: powershell.exe
+          env_names: TEST_MAPPING_PATH
+          run: >-
+            c:\map\test\run_test.ps1 -testPath "c:\map\test\run_default.Tests.ps1";
+
+      - name: Test_ExtraArgs
+        uses: ./
+        with:
+          image: ${{ matrix.docker_container }}
+          mapping_path: 'c:\map'
+          workspace_path: ${{ github.workspace }}
+          extra_args: --entrypoint cmd.exe
+          run: >-
+            echo "Hello world";
+            exit %ERRORLEVEL%;
+
+      - name: Test_Environment
+        uses: ./
+        with:
+          image: ${{ matrix.docker_container }}
+          entrypoint: powershell.exe
+          mapping_path: 'c:\map'
+          env_names: TEST1, TEST2
+          run: >-
+            c:\map\test\run_test.ps1 -testPath "c:\map\test\environment.Tests.ps1";
+
+      - name: Test_Default_Environment
+        uses: ./
+        with:
+          image: ${{ matrix.docker_container }}
+          entrypoint: powershell.exe
+          mapping_path: 'c:\map'
+          run: >-
+            c:\map\test\run_test.ps1 -testPath "c:\map\test\default_environment.Tests.ps1";
+
+      - name: Test_WorkPath
+        uses: ./
+        with:
+          image: ${{ matrix.docker_container }}
+          mapping_path: 'c:\map'
+          work_path: 'c:\temp'
+          entrypoint: powershell.exe
+          memory: 3GB
+          run: >-
+            c:\map\test\run_test.ps1 -testPath "c:\map\test\work_path.Tests.ps1";
+
+      - name: Test_MappingPath
+        uses: ./
+        with:
+          image: ${{ matrix.docker_container }}
+          mapping_path: 'c:\mapping'
+          work_path: 'c:\temp'
+          entrypoint: powershell.exe
+          memory: 3GB
+          run: >-
+            c:\mapping\test\run_test.ps1 -testPath "c:\mapping\test\mapping_path.Tests.ps1";
+
+      - name: Test_WorkSpacePath
+        uses: ./
+        with:
+          image: ${{ matrix.docker_container }}
+          mapping_path: 'c:\map'
+          workspace_path: ${{ github.workspace }}/test
+          entrypoint: powershell.exe
+          memory: 3GB
+          env_names: TEST_MAPPING_PATH
+          run: >-
+            c:\map\run_test.ps1 -testPath "c:\map\workspace_path.Tests.ps1";
+
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate
+    container: mcr.microsoft.com/powershell:7.5-ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install
+        shell: pwsh
+        run: >-
+             Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted;
+             Install-Module -Name Pester -Force -SkipPublisherCheck;
+             Update-Module -Name Pester -Force;
+             Install-Module -Name PSScriptAnalyzer -Force;
+             Import-Module PSScriptAnalyzer -ErrorAction Stop
+      - name: Linter src
+        shell: pwsh
+        run: >-
+             Invoke-ScriptAnalyzer -Path src -EnableExit;
+      - name: Linter test
+        shell: pwsh
+        run: >-
+             Invoke-ScriptAnalyzer -Path test -EnableExit;
+      - name: Test-Action-Scripts
+        shell: pwsh
+        run: >-
+             cd src;
+             $config=New-PesterConfiguration;
+             $config.Run.Exit=$true;
+             Invoke-Pester -Configuration $config;
